@@ -1,1 +1,1 @@
-import .pynet
+from pynet.pynet import *
