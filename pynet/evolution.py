@@ -14,7 +14,7 @@ import copy
 
 class Population:#(UniqueStatusObject):
 	"""Population of dna.
-	Attributes:
+	Args:
 		ID (str): Unique Identifier of the population
 		census (list): List of integer dnas.
 		seeds (list): List of integer dnas to seed this population.

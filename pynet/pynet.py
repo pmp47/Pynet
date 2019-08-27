@@ -4,6 +4,7 @@ import tensorflow as tf
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn import metrics
+#import tensorflow_transform as tft
 
 #customs
 from evolution import Evolution, Population
@@ -194,6 +195,9 @@ class Pynet:
 			#https://blog.statsbot.co/time-series-prediction-using-recurrent-neural-networks-lstms-807fa6ca7f
 			raise ValueError('Recurrent pynet still unspported :(')
 
+		#create list of tensorflow ops for printing (should showSteps be True)
+		print_ops = []
+
 		#determine if this pynet is a group
 		isGroup,sample_dim,n_members = Pynet.Utils.DetermineGroup(self)
 
@@ -228,8 +232,9 @@ class Pynet:
 					
 				#preprocess input
 				Xp_tf = PreProcess.DNA.fcns[self.preProcessor.processFcn](X_tf,xmax_tf,xmin_tf,ymax_tf,ymin_tf,xmean_tf,xstd_tf)
-				if showSteps: Xp_tf = tf.Print(Xp_tf, [tf.shape(Xp_tf),Xp_tf], message="--- Xp_tf0:\n")
-					
+				#if showSteps: Xp_tf = tf.Print(Xp_tf, [tf.shape(Xp_tf),Xp_tf], message="--- Xp_tf0:\n")
+				if showSteps: print_ops.append(tf.print('Xp_tf0: ',Xp_tf))
+				
 				#create layer dependancies to ensure proper calculation control/flow
 				layer_input_dependancies,layer_output_dependancies = Pynet.Utils.Initialize_layer_dependancies(self,Xp_tf,b,iw,lw,layer_output_tensors)
 
@@ -241,7 +246,8 @@ class Pynet:
 						if self.isInput[L]: #if this layer takes input
 							#weight function
 							Z_tf = Layer.DNA.weight_fcns[self.layers[L].weightFcn](Xp_tf,iw[L])
-							if showSteps: Z_tf = tf.Print(Z_tf, [tf.shape(Z_tf),Z_tf], message="--- Z_tf_Li:" + str(L) + ":\n")
+							#if showSteps: Z_tf = tf.Print(Z_tf, [tf.shape(Z_tf),Z_tf], message="--- Z_tf_Li:" + str(L) + ":\n")
+							if showSteps: print_ops.append(tf.print('Z_tf_Li:' + str(L) + ': ',Z_tf))
 							layer_inputs.append(Z_tf) #add to list of total inputs to layer
 								
 						#collect layer input from other layer output
@@ -249,17 +255,20 @@ class Pynet:
 							if self.layerConnect[L][L_i]: #if this layer takes layer input connection
 								#weight function
 								Z_tf = Layer.DNA.weight_fcns[self.layers[L].weightFcn](layer_output_tensors[L_i],lw[L][L_i])
-								if showSteps: Z_tf = tf.Print(Z_tf, [tf.shape(Z_tf),Z_tf], message="--- Z_tf_L:" + str(L) + ":\n")
+								#if showSteps: Z_tf = tf.Print(Z_tf, [tf.shape(Z_tf),Z_tf], message="--- Z_tf_L:" + str(L) + ":\n")
+								if showSteps: print_ops.append(tf.print('Z_tf_L:' + str(L) + ': ',Z_tf))
 								layer_inputs.append(Z_tf)
 
 					with tf.control_dependencies(layer_output_dependancies[L]): #with output control dependancies
 						#bias function
 						N_tf = Layer.DNA.input_fcns[self.layers[L].inputFcn](layer_inputs,b[L])
-						if showSteps: N_tf = tf.Print(N_tf, [tf.shape(N_tf),N_tf], message="--- N_tf_L:" + str(L) + ":\n")
+						#if showSteps: N_tf = tf.Print(N_tf, [tf.shape(N_tf),N_tf], message="--- N_tf_L:" + str(L) + ":\n")
+						if showSteps: print_ops.append(tf.print('N_tf_L:' + str(L) + ': ',N_tf))
 
 						#transfer function
 						A_tf = Transfer.DNA.fcns[self.layers[L].transferFcn](N_tf,sample_dim + 1) #why +1?
-						if showSteps: A_tf = tf.Print(A_tf, [tf.shape(A_tf),A_tf], message="--- A_tf_L:" + str(L) + ":\n")
+						#if showSteps: A_tf = tf.Print(A_tf, [tf.shape(A_tf),A_tf], message="--- A_tf_L:" + str(L) + ":\n")
+						if showSteps: print_ops.append(tf.print('A_tf_L:' + str(L) + ': ',A_tf))
 							
 						#TODO: still dont know how to hold onto layer output but also use an initialize zeros value
 						#want to capture layer output after sim so if session is closed, can still use
@@ -272,14 +281,15 @@ class Pynet:
 
 						if self.isOutput[L]:
 							#with tf.control_dependencies(layer_output_signal[L]):
-							signal_tf = layer_output_tensors[L]
+							with tf.control_dependencies(print_ops):
+								signal_tf = layer_output_tensors[L]
 
 				#placeholder for targets
 				T_tf = tf.placeholder(dtype=tf.float32,name='T_tf')
 
 				#set performance function as a loss to minimize
 				loss_tf = Performance.DNA.fcns[self.trainer.performFcn](T_tf,signal_tf)
-				
+
 				#use training function to update weights/bias
 				update_wb = Training.DNA.fcns[self.trainer.trainFcn](self.trainer.min_grad,self.trainer.learning_rate,loss_tf,var_list)
 
@@ -756,9 +766,12 @@ class Pynet:
 			fitness_target (float): Target to achieve with the specified fitness method.
 		Returns:
 			Pynet: net
+		Ref:
+			https://www.ijcai.org/Proceedings/89-1/Papers/122.pdf
+
 		Notes:
 			Evolving completes when the time limit expires, the max generation is reached in the population, or the fitness target is achieved - whichever occurs first.
-			"""
+		"""
 
 		population = Population(**{
 			'elite_percentage': elite_percentage,
@@ -1745,9 +1758,9 @@ class Pynet:
 class Training:
 	"""Configuration of parameters which determine Pynet training procedure.
 	Args:
-		performFcn (str): 'mse' | 'mae' | 'sse' | 'sae' | 'crossentropy'
-		trainFcn (str): 'trainadam' | 'traingd' | 'trainagd'
-		divideFcn (str): 'dividerand' | 'divideind'
+		performFcn (str): see Performance.DNA.fcns.keys()
+		trainFcn (str): see Training.DNA.fcns.keys()
+		divideFcn (str): see DatasetDivider.DNA.fcns.keys()
 		divideParams (dict): ['trainRatio'], ['valRatio'], ['testRatio']
 		epochs (int): Max iterations for the training function.
 		goal (float): Target value for performance function.
@@ -1825,12 +1838,82 @@ class Training:
 		"""
 		return tf.train.AdagradOptimizer(learning_rate=lr).minimize(loss_tf,var_list=var_list)
 
+	def AdaptiveDeltaGradientDescent(lr: float,loss_tf: tf.Tensor,var_list: list):
+		"""Adaptive Delta gradient descent optimization.
+		Args:
+			lr (float): Learning rate.
+			loss_tf (tf.Tensor): The performance loss result.
+			var_list (list): Optional list Variable objects to update to minimize loss.
+		Returns:
+			tf.Operation: update_wb
+		Ref:
+			https://www.tensorflow.org/api_docs/python/tf/train/AdadeltaOptimizer
+		"""
+		return tf.train.AdadeltaOptimizer(learning_rate=lr).minimize(loss_tf,var_list=var_list)
+
+	def FollowTheRegularizedLeader(lr: float,loss_tf: tf.Tensor,var_list: list):
+		"""Follow the regularized leader optimization.
+		Args:
+			lr (float): Learning rate.
+			loss_tf (tf.Tensor): The performance loss result.
+			var_list (list): Optional list Variable objects to update to minimize loss.
+		Returns:
+			tf.Operation: update_wb
+		Ref:
+			https://www.tensorflow.org/api_docs/python/tf/train/FtrlOptimizer
+		"""
+		return tf.train.FtrlOptimizer(learning_rate=lr).minimize(loss_tf,var_list=var_list)
+
+	def ProximalAdaptiveGradientDescent(lr: float,loss_tf: tf.Tensor,var_list: list):
+		"""Proximal adaptive gradient descent optimization.
+		Args:
+			lr (float): Learning rate.
+			loss_tf (tf.Tensor): The performance loss result.
+			var_list (list): Optional list Variable objects to update to minimize loss.
+		Returns:
+			tf.Operation: update_wb
+		Ref:
+			https://www.tensorflow.org/api_docs/python/tf/train/ProximalAdagradOptimizer
+		"""
+		return tf.train.ProximalAdagradOptimizer(learning_rate=lr).minimize(loss_tf,var_list=var_list)
+
+	def ProximalGradientDescent(lr: float,loss_tf: tf.Tensor,var_list: list):
+		"""Proximal gradient descent optimization.
+		Args:
+			lr (float): Learning rate.
+			loss_tf (tf.Tensor): The performance loss result.
+			var_list (list): Optional list Variable objects to update to minimize loss.
+		Returns:
+			tf.Operation: update_wb
+		Ref:
+			https://www.tensorflow.org/api_docs/python/tf/train/ProximalGradientDescentOptimizer
+		"""
+		return tf.train.ProximalGradientDescentOptimizer(learning_rate=lr).minimize(loss_tf,var_list=var_list)
+
+	def RootMeanSquarePropigation(lr: float,loss_tf: tf.Tensor,var_list: list):
+		"""Root mean square optimization.
+		Args:
+			lr (float): Learning rate.
+			loss_tf (tf.Tensor): The performance loss result.
+			var_list (list): Optional list Variable objects to update to minimize loss.
+		Returns:
+			tf.Operation: update_wb
+		Ref:
+			https://www.tensorflow.org/api_docs/python/tf/train/RMSPropOptimizer
+		"""
+		return tf.train.RMSPropOptimizer(learning_rate=lr).minimize(loss_tf,var_list=var_list)
+
 	class DNA:
 
 		fcns = {
 			'trainadam': lambda min_grad,lr,loss,var_list: Training.Adam(min_grad,lr,loss,var_list),
 			'traingd': lambda min_grad,lr,loss,var_list: Training.GradientDescent(lr,loss,var_list),
 			'trainagd': lambda min_grad,lr,loss,var_list: Training.AdaptiveGradientDescent(lr,loss,var_list),
+			'trainadeltagd': lambda min_grad,lr,loss,var_list: Training.AdaptiveDeltaGradientDescent(lr,loss,var_list),
+			'trainftrl': lambda min_grad,lr,loss,var_list: Training.FollowTheRegularizedLeader(lr,loss,var_list),
+			'trainpagd': lambda min_grad,lr,loss,var_list: Training.ProximalAdaptiveGradientDescent(lr,loss,var_list),
+			'trainpgd': lambda min_grad,lr,loss,var_list: Training.ProximalGradientDescent(lr,loss,var_list),
+			'trainrms': lambda min_grad,lr,loss,var_list: Training.RootMeanSquarePropigation(lr,loss,var_list),
 			#'trainscg': lambda loss,var_list: Training.Adam(min_grad,lr,loss,var_list) #TODO: make scaled conjugate gradient
 			}
 
@@ -1838,7 +1921,11 @@ class Training:
 			0: 'trainadam',
 			1: 'traingd',
 			2: 'trainagd',
-			#3: 'trainscg'
+			3: 'trainadeltagd',
+			4: 'trainftrl',
+			5: 'trainpagd',
+			6: 'trainpgd',
+			7: 'trainrms',
 			}
 
 		train_fcn_bits = 8
@@ -1914,7 +2001,7 @@ class Training:
 class Layer:
 	"""Neuron layer for a Pynet.
 	Args:
-		transferFcn (str): 'tansig' | 'logsig' | purelin' | 'softmax' | 'softplus' | 'relu' | 'elu' | 'selu' | 'swish'
+		transferFcn (str): see Transfer.DNA.keys()
 		inputWeights (np.array): Weights for transferring input signals.
 		layerWeights (np.array): Weights for transferring layer signals.
 		weightFcn (str): 'dotprod' |
@@ -2402,6 +2489,7 @@ class Transfer:
 		#exp(n)/sum(exp(n))
 		#N[] => A[n_samples,n_classes]
 		#return tf.exp(N_tf) / tf.reduce_sum(tf.exp(N_tf), axis=dim)
+		#return tf.nn.softmax(N_tf,axis=dim,name='Softmax')
 		with tf.name_scope('Softmax'): return tf.nn.softmax(N_tf, axis=dim)
 
 	def Softplus(N_tf: tf.Tensor):
@@ -2459,7 +2547,40 @@ class Transfer:
 		Ref:
 			https://arxiv.org/abs/1710.05941
 		"""
-		with tf.name_scope('Swish'): return	tf.nn.swish(N_tf)
+		with tf.name_scope('Swish'): return tf.nn.swish(N_tf)
+
+	def SoftSign(N_tf: tf.Tensor):
+		"""Soft sign activation function.
+		Args:
+			N_tf (tf.Tensor): Neuron input signal.
+		Returns:
+			tf.Tensor: A_tf
+		Ref:
+			https://www.tensorflow.org/versions/r1.12/api_docs/python/tf/nn/softsign
+		"""
+		with tf.name_scope('SoftSign'): return tf.nn.softsign(N_tf)
+
+	def LogSoftmax(N_tf: tf.Tensor):
+		"""Logarythmic softmax activation function.
+		Args:
+			N_tf (tf.Tensor): Neuron input signal.
+		Returns:
+			tf.Tensor: A_tf
+		Ref:
+			https://www.tensorflow.org/api_docs/python/tf/nn/log_softmax
+		"""
+		with tf.name_scope('LogSoftmax'): return tf.nn.log_softmax(N_tf)
+
+	def LeakyReLu(N_tf: tf.Tensor):
+		"""Leaky rectified linear unit activation function.
+		Args:
+			N_tf (tf.Tensor): Neuron input signal.
+		Returns:
+			tf.Tensor: A_tf
+		Ref:
+			https://www.tensorflow.org/api_docs/python/tf/nn/leaky_relu
+		"""
+		with tf.name_scope('LogSoftmax'): return tf.nn.leaky_relu(N_tf)
 
 	class DNA:
 
@@ -2474,6 +2595,9 @@ class Transfer:
 			'elu': lambda x,fdim: Transfer.eLu(x),
 			'selu': lambda x,fdim: Transfer.SeLu(x),
 			'swish': lambda x,fdim: Transfer.Swish(x),
+			'softsign': lambda x,fdim: Transfer.SoftSign(x),
+			'logsoftmax': lambda x,fdim: Transfer.LogSoftmax(x),
+			'leakyrelu': lambda x,fdim: Transfer.LeakyReLu(x),
 			}
 		genes = {
 			0: 'tansig',
@@ -2486,6 +2610,9 @@ class Transfer:
 			6: 'elu',
 			7: 'selu',
 			8: 'swish',
+			9: 'softsign',
+			10: 'logsoftmax',
+			11: 'leakyrelu',
 			}
 
 		input_range = {
@@ -2498,7 +2625,10 @@ class Transfer:
 			'relu': [-float('Inf'),float('Inf')],
 			'elu': [-float('Inf'),float('Inf')],
 			'selu': [-float('Inf'),float('Inf')],
-			'swish': [-float('Inf'),float('Inf')]
+			'swish': [-float('Inf'),float('Inf')],
+			'softsign': [-float('Inf'),float('Inf')],
+			'logsoftmax': [-float('Inf'),float('Inf')],
+			'leakyrelu': [-float('Inf'),float('Inf')],
 			}
 
 		output_range = {
@@ -2511,7 +2641,10 @@ class Transfer:
 			'relu': [0,float('Inf')],
 			'elu': [0,float('Inf')],
 			'selu': [0,float('Inf')],
-			'swish': [-float('Inf'),float('Inf')]
+			'swish': [-float('Inf'),float('Inf')],
+			'softsign': [0,float('Inf')],
+			'logsoftmax': [-float('Inf'),float('Inf')],
+			'leakyrelu': [-float('Inf'),float('Inf')],
 			}
 	
 		transfer_fcn_bits = 8
@@ -2609,7 +2742,7 @@ class PreProcess:
 
 		return ((X_tf - xmean_tf) / xstd_tf)
 
-	def PrincipleComponentAnalysis(X_tf: tf.Tensor, xmean_tf: tf.Tensor,ss_tf: tf.Tensor,us_tf: tf.Tensor,vs_tf: tf.Tensor):
+	def PrincipleComponentAnalysis(X_tf: tf.Tensor):#, xmean_tf: tf.Tensor,ss_tf: tf.Tensor,us_tf: tf.Tensor,vs_tf: tf.Tensor):
 		"""Compute PCA on the bottom two dimensions of x, eg assuming dims = [..., observations, features]
 		Args:
 			INCOMPLETE
@@ -2624,6 +2757,8 @@ class PreProcess:
 			https://plot.ly/ipython-notebooks/principal-component-analysis/
 		"""
 		
+		#return tft.pca(X_tf,2,tf.float32)
+
 		raise ValueError('PCA incomplete')
 		#TODO: these settings should be stored from training set, like the center
 		#basically, 
@@ -2656,7 +2791,7 @@ class PreProcess:
 
 		fcns = {
 			'mapminmax': lambda x,xmax,xmin,ymax,ymin,xmean,xstd: PreProcess.Mapminmax(x,xmax,xmin,ymax,ymin),
-			'standardize': lambda x,xmax,xmin,ymax,ymin,xmean,xstd: PreProcess.Standardize(x,xmean,xstd)
+			'standardize': lambda x,xmax,xmin,ymax,ymin,xmean,xstd: PreProcess.Standardize(x,xmean,xstd),
 			#'pca': lambda x,xmax,xmin,ymax,ymin,xmean,xstd: PreProcess.PrincipleComponentAnalysis(x),
 			}
 		genes = {
@@ -3032,8 +3167,12 @@ class Tests:
 		patternnet = Pynet.Models.PatternnetGroup(8,True)
 		#patternnet = Pynet.Models.FitnetGroup(8,True)
 
-		patternnet.ConfigureGraph(True)
+		patternnet.ConfigureGraph(showSteps=True)
 
+		#patternnet.trainer.epochs = 50
+		#patternnet.layers[0].transferFcn = 'leakyrelu'
+		#patternnet.preProcessor.processFcn = 'pca'
+		
 		training_res = patternnet.Train(X,T)
 
 		err = patternnet.Loss(X,T)
