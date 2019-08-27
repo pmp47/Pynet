@@ -2580,7 +2580,7 @@ class Transfer:
 		Ref:
 			https://www.tensorflow.org/api_docs/python/tf/nn/leaky_relu
 		"""
-		with tf.name_scope('LogSoftmax'): return tf.nn.leaky_relu(N_tf)
+		with tf.name_scope('LeakyReLu'): return tf.nn.leaky_relu(N_tf)
 
 	class DNA:
 
