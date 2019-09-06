@@ -3314,7 +3314,7 @@ class Tests:
 			#https://archive.ics.uci.edu/ml/machine-learning-databases/iris/iris.data
 
 			dataset_router = {
-				'iris': './data/irisClassification.json'
+				'iris': __file__.split('pynet.py')[0] + './data/irisClassification.json'
 				}
 
 			jsonLines = open(dataset_router[dataset],'r').readlines()
