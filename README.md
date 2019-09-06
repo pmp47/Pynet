@@ -169,7 +169,7 @@ Y = member.Sim(X)
 # Further Information
 Looking for more explanation? The code itself is documented in a way meant to be read and understood easily. A good place to start with this package would be:
 ```python
-Pynet.Tests.main
+pynet.Tests.main
 ```
 
 # TODO

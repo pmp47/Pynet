@@ -5,10 +5,10 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn import metrics
 #import tensorflow_transform as tft
+from evolution import Evolution, Population
+import numpyextension as npe
 
 #customs
-from evolution import Evolution, Population
-import numpy_ext as npe
 
 #builtins
 import json
@@ -168,7 +168,7 @@ class Pynet:
 		net['performFcn'] = self.trainer.performFcn
 		net['trainFcn'] = self.trainer.trainFcn
 		net['trainParam']['showCommandLine'] = self.trainer.showCommandLine
-		net['trainParam']['show'] = self.trainer.show
+		#net['trainParam']['show'] = self.trainer.show
 		net['trainParam']['epochs'] = self.trainer.epochs
 		#net['trainParam']['time'] = self.trainer.time
 		net['trainParam']['goal'] = self.trainer.goal
@@ -730,8 +730,9 @@ class Pynet:
 				scores['prec'].append(metrics.precision_score(y_true,y_pred,average='macro'))
 				scores['recall'].append(metrics.recall_score(y_true,y_pred,average='macro'))
 				scores['mcc'].append(metrics.matthews_corrcoef(y_true,y_pred))
-				scores['jac'].append(metrics.jaccard_similarity_score(y_true,y_pred))
-
+				#scores['jac'].append(metrics.jaccard_similarity_score(y_true,y_pred))
+				scores['jac'].append(metrics.jaccard_score(y_true,y_pred,average='macro'))
+				
 				if np.any(y_prob < 0) or np.any(y_prob > 1):
 					scores['auc_roc'].append(0)
 					scores['brier'].append(1)
@@ -3504,7 +3505,7 @@ Y = member.Sim(X)
 # Further Information
 Looking for more explanation? The code itself is documented in a way meant to be read and understood easily. A good place to start with this package would be:
 ```python
-Pynet.Tests.main
+pynet.Tests.main
 ```
 
 # TODO
