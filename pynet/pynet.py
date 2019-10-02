@@ -433,7 +433,7 @@ class Pynet:
 		else:
 			return result
 		
-	def Train(self,X: np.array,T: np.array,log_device_placement=False,recordGraph=False,recordPath='./Graphs/defaultGraphName',dynamic_preprocessing=True):
+	def Train(self,X: np.array,T: np.array,log_device_placement=False,recordGraph=False,recordPath='./Graphs/defaultGraphName',dynamic_preprocessing=True,use_regression=False):
 		"""Trains this pynet given inputs and targets. If is a pynetgroup, each pynet in the group is trained individually and the group's performance function is used as the overall loss.
 		Args:
 			X (np.array): shape => [n_samples,n_features] or [n_members,n_samples,n_features]
@@ -442,6 +442,7 @@ class Pynet:
 			recordGraph (bool): Whether to record the network using tensorboard.
 			recordPath (str):  Path to record network graph to.
 			dynamic_preprocessing (bool): If false, self.preProcessor.settings must be set.
+			use_regression (bool): Evaluate training using regression techniques. Default is classification.
 		Returns:
 			dict: training_result
 		"""
@@ -459,6 +460,10 @@ class Pynet:
 			
 		self.n_features = input_shape[1]
 		self.n_classes = target_shape[1]
+
+		#cannot use classification default if only a single class
+		if not use_regression and self.n_classes == 1:
+			use_regression = True
 
 		n_samples = input_shape[0]
 
@@ -701,44 +706,74 @@ class Pynet:
 			except: #inf will be float not np.float32
 				loss = validation_loss_last
 
-			scores = {
-				'acc': [],
-				'f1': [],
-				'hamming': [],
-				'prec': [],
-				'recall': [],
-				'auc_roc': [],
-				'brier': [],
-				'mcc': [],
-				'jac': []
-				}
+			if not use_regression:
+				scores = {
+					'acc': [],
+					'f1': [],
+					'hamming': [],
+					'prec': [],
+					'recall': [],
+					'auc_roc': [],
+					'brier': [],
+					'mcc': [],
+					'jac': []
+					}
+			else:
+				scores = {
+					'mse': [],
+					'mae': [],
+					'msle': [],
+					'r2': []
+					}
 
 			#simulate an output signal
 			Y = self.Sim(X)
 
 			for member in range(n_members):
 
-				y_pred = np.argmax(Y[member],axis=1).flatten()
-				y_true = np.argmax(T,axis=1).flatten()
+				if not use_regression:
+					#results evaluated using classificaiton scores
 
-				y_prob = Y[member,:,:].flatten()
-				y_class = T.flatten()
+					y_pred = np.argmax(Y[member],axis=1).flatten()
+					y_true = np.argmax(T,axis=1).flatten()
 
-				scores['acc'].append(metrics.accuracy_score(y_true,y_pred))
-				scores['f1'].append(metrics.f1_score(y_true,y_pred,average='macro'))
-				scores['hamming'].append(metrics.hamming_loss(y_true,y_pred))
-				scores['prec'].append(metrics.precision_score(y_true,y_pred,average='macro'))
-				scores['recall'].append(metrics.recall_score(y_true,y_pred,average='macro'))
-				scores['mcc'].append(metrics.matthews_corrcoef(y_true,y_pred))
-				#scores['jac'].append(metrics.jaccard_similarity_score(y_true,y_pred))
-				scores['jac'].append(metrics.jaccard_score(y_true,y_pred,average='macro'))
+					y_prob = Y[member,:,:].flatten()
+					y_class = T.flatten()
+
+					scores['acc'].append(metrics.accuracy_score(y_true,y_pred))
+					scores['f1'].append(metrics.f1_score(y_true,y_pred,average='macro'))
+					scores['hamming'].append(metrics.hamming_loss(y_true,y_pred))
+					scores['prec'].append(metrics.precision_score(y_true,y_pred,average='macro'))
+					scores['recall'].append(metrics.recall_score(y_true,y_pred,average='macro'))
+					scores['mcc'].append(metrics.matthews_corrcoef(y_true,y_pred))
+					#scores['jac'].append(metrics.jaccard_similarity_score(y_true,y_pred))
+					scores['jac'].append(metrics.jaccard_score(y_true,y_pred,average='macro'))
 				
-				if np.any(y_prob < 0) or np.any(y_prob > 1):
-					scores['auc_roc'].append(0)
-					scores['brier'].append(1)
+					if np.any(y_prob < 0) or np.any(y_prob > 1):
+						scores['auc_roc'].append(0)
+						scores['brier'].append(1)
+					else:
+						scores['auc_roc'].append(metrics.roc_auc_score(y_class,y_prob))
+						scores['brier'].append(metrics.brier_score_loss(y_class,y_prob))
 				else:
-					scores['auc_roc'].append(metrics.roc_auc_score(y_class,y_prob))
-					scores['brier'].append(metrics.brier_score_loss(y_class,y_prob))
+					#results evaulated using regression scores
+					y_true = T.flatten()
+					y_pred = Y[member].flatten()
+
+					if any(np.isnan(y_pred)):
+						scores['mse'].append(np.inf)
+						scores['mae'].append(np.inf)
+						scores['r2'].append(0)
+						scores['msle'].append(np.inf)
+					else:
+						scores['mse'].append(metrics.mean_squared_error(y_true,y_pred))
+						scores['mae'].append(metrics.mean_absolute_error(y_true,y_pred))
+						scores['r2'].append(metrics.r2_score(y_true,y_pred))
+						
+						try:
+							scores['msle'].append(metrics.mean_squared_log_error(y_true,y_pred))
+						except:
+							scores['msle'].append(np.inf)
 
 			training_results = {
 				'epochs': epoch,
@@ -749,14 +784,15 @@ class Pynet:
 
 			return training_results
 
-	def Evolve(X: np.array,T: np.array,useGPU: bool,population_capacity: int,fitness_method: str,elite_percentage=0.1,survivor_percentage=0.2,mutation_chance=0.001,seeds=None,groupSize=8,time_limit_minutes=60,max_gen=60,fitness_target=0.9999):
+	def Evolve(X: np.array,T: np.array,useGPU: bool,population_capacity: int,fitness_method: str,\
+		elite_percentage=0.1,survivor_percentage=0.2,mutation_chance=0.001,seeds=None,groupSize=8,time_limit_minutes=60,max_gen=60,fitness_target=0.9999,use_regression=False):
 		"""Genetically evolve a Pynet neural network to an optimal structure for the input/target data.
 		Args:
 			X (np.array): shape => [n_samples,n_features] or X[n_members,n_samples,n_features]
 			T (np.array): shape => [n_samples,n_classes] or X[n_members,n_samples,n_classes]
 			useGPU (bool): True to configure and utilize the GPU for computation.
 			population_capacity (int): Total number of individul dnas.
-			fitness_method (str): 'acc' | 'f1' | 'hamming' | 'prec' | 'recall' | 'mcc' | 'jac' | 'auc_roc' | 'brier'
+			fitness_method (str): 'acc' | 'f1' | 'hamming' | 'prec' | 'recall' | 'mcc' | 'jac' | 'auc_roc' | 'brier' OR 'mse' | 'mae' | 'msle' | 'r2' (for regression)
 			elite_percentage (float): Percentage of population considered to be elite and will automatically be selected to survive.
 			survivor_percentage (float): Percentage of population that will survive.
 			mutation_chance (float): Percent change of an allele to mutate (switch) during crossover.
@@ -765,6 +801,7 @@ class Pynet:
 			time_limit_minutes (int): Default of 60 minute time limit for evolving.
 			max_gen (int): Maximum generations for the evolving population to achieve.
 			fitness_target (float): Target to achieve with the specified fitness method.
+			use_regression (bool): Evaluate training using regression techniques. Default is classification.
 		Returns:
 			Pynet: net
 		Ref:
@@ -784,6 +821,7 @@ class Pynet:
 			#add seed to census
 			for seed in population.seeds:
 				population.census.append(seed)
+				population.generated.append(True)
 
 		#acquire shape of inputs
 		input_shape = np.shape(X)
@@ -813,7 +851,13 @@ class Pynet:
 				In some methods, lower score is better but this evolution searches for highest so must be flipped.
 			"""
 			if (method == 'brier') or (method == 'hamming'):
+				#brier sore and hamming are better the closer they are to 0, not 1
 				fit_score = 1 - np.mean(result['scores'][method])
+			elif (method == 'mse') or (method == 'mae') or (method == 'msle') :
+				#regression errors are better the smaller they are
+				a = 5
+				fit_score = 1 - (1 / np.mean(result['scores'][method]))
+				a = 5
 			else:
 				fit_score = np.mean(result['scores'][method])
 
@@ -821,7 +865,7 @@ class Pynet:
 
 		#assess initial generation fitness
 		for dna in population.census:
-			training_result = Pynet.DNA.Form(dna,groupSize,useGPU,n_features,n_classes).Train(X,T)
+			training_result = Pynet.DNA.Form(dna,groupSize,useGPU,n_features,n_classes).Train(X,T,use_regression=use_regression)
 			population.fitness.append(get_fitness(fitness_method,training_result))
 
 		#store best dna
@@ -835,6 +879,7 @@ class Pynet:
 		while (clock <= time_limit_minutes * 60) and (gen <= max_gen) and (best_fitness < fitness_target): #TODO: stall
 
 			#get new generation
+			#TODO: is pop cap too small, wont be any survivors (all be elite?)
 			population = Evolution.Selection(population,total_possible_bits,survivor_percentage,elite_percentage,mutation_chance)
 
 			#ensure new generation has valid dna
@@ -982,9 +1027,13 @@ class Pynet:
 			for L in range(0,len(net.layers)):
 				if net.layerConnect[L][L]:
 					#w_shape = [groupSize,n_nodes[L_i],n_nodes[L]] from dna2net
+					#TODO: tf.shape is to be depricated? says .shape is always calculated
 					n_samples = tf.shape(X_tf)[sample_dim]#self.layers[L].n_nodes #TODO: problem being none if recurrent - should
 				else:
 					n_samples = tf.shape(X_tf)[sample_dim]
+
+
+
 				if isGroup:
 					#1 - make a tensor of zeros
 					layer_output_tensors[L] = tf.zeros([n_members,n_samples,net.layers[L].n_nodes],tf.float32,name='Ai_tf' + str(L))
