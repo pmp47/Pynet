@@ -923,7 +923,7 @@ class Pynet:
 		my_dna = Pynet.DNA.Extract(self)
 
 		#create single member
-		member = Pynet.DNA.Form(my_dna,1,False,n_features=self.n_features,n_classes=self.n_classes)
+		member = Pynet.DNA.Form(my_dna,1,self.useGPU,n_features=self.n_features,n_classes=self.n_classes)
 		#TODO: extract and forming could change DNA?
 
 		#extract the layer's node values
@@ -941,29 +941,44 @@ class Pynet:
 
 			member.layers[L].bias[0] = self.layers[L].bias[out]
 			
+		#the preprocessor settings must remain the same
+		member.preProcessor.settings = self.preProcessor.settings
+
+		member.ConfigureGraph()
 		return member
 
 	def AppendMember(self,member):
 		"""Append a Pynet to this Pynetgroup as a new member.
 		Args:
 			member (Pynet): 
+		Notes:
+			Appends entire group in member, so if only want to append a single network, first MemberOut it.
 		"""
+
+		isGroup,sample_dim,n_members = Pynet.Utils.DetermineGroup(member)
+
+		if not isGroup:
+			raise ValueError('Currently Pynets must be a group (even with 1 member)')
+
+		if Pynet.DNA.Extract(self) != Pynet.DNA.Extract(member):
+			raise ValueError('The member Pynet to be added to this Pynet group msut have the same DNA.')
+
 		#extract the layer's node values
 		for L in range(len(self.layers)):
-
-			try:
-				self.layers[L].inputWeights.append(member.layers[L].inputWeights[0])
-			except:
-				self.layers[L].inputWeights.append(member.layers[L].inputWeights)
+			
+			if self.isInput[L]:
+				self.layers[L].inputWeights = np.vstack((self.layers[L].inputWeights,member.layers[L].inputWeights))
 
 			for L_i in range(len(self.layers)):
-				try:
-					self.layers[L].layerWeights[L_i].append(member.layers[L].layerWeights[L_i][0])
-				except:
-					self.layers[L].layerWeights[L_i].append(member.layers[L].layerWeights[L_i])
 					
-			self.layers[L].bias.append(member.layers[L].bias[0])
+				if self.layerConnect[L][L_i]: #self.layers[L].layerWeights[L_i] != []:
 
+					self.layers[L].layerWeights[L_i] = np.vstack((np.array(self.layers[L].layerWeights[L_i]),np.array(member.layers[L].layerWeights[L_i])))
+
+
+			self.layers[L].bias = np.vstack((self.layers[L].bias,member.layers[L].bias))
+
+		self.ConfigureGraph()
 		return self
 
 	class Utils:
@@ -1703,7 +1718,7 @@ class Pynet:
 				for L_i in range(0,n_layers): #TODO: fails if improperly saved?
 					#layerWeights[L_i] = np.array(net['LW'][(L_i * n_layers) + L],np.float32), #list, not array
 					lw = np.array(net['LW'][(L_i * n_layers) + L],np.float32)
-					layerWeights[L_i] = lw #list, not array
+					layerWeights[L_i] = lw #list, not array -> NO its a dict with L as key
 
 				layers[L] = Layer(**{
 					'transferFcn': transferFcn,

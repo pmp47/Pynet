@@ -1,6 +1,6 @@
 from setuptools import setup
 setup(name='Pynet',
-	version='1.4.1',
+	version='1.4.2',
 	description='A neural network toolbox designed for evolution optimzation.',
 	url='https://www.github.com/pmp47/Pynet',
 	author='pmp47',
