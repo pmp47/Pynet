@@ -706,74 +706,76 @@ class Pynet:
 			except: #inf will be float not np.float32
 				loss = validation_loss_last
 
-			if not use_regression:
-				scores = {
-					'acc': [],
-					'f1': [],
-					'hamming': [],
-					'prec': [],
-					'recall': [],
-					'auc_roc': [],
-					'brier': [],
-					'mcc': [],
-					'jac': []
-					}
-			else:
-				scores = {
-					'mse': [],
-					'mae': [],
-					'msle': [],
-					'r2': []
-					}
+			#if not use_regression:
+			#	scores = {
+			#		'acc': [],
+			#		'f1': [],
+			#		'hamming': [],
+			#		'prec': [],
+			#		'recall': [],
+			#		'auc_roc': [],
+			#		'brier': [],
+			#		'mcc': [],
+			#		'jac': []
+			#		}
+			#else:
+			#	scores = {
+			#		'mse': [],
+			#		'mae': [],
+			#		'msle': [],
+			#		'r2': []
+			#		}
 
-			#simulate an output signal
-			Y = self.Sim(X)
+			##simulate an output signal
+			#Y = self.Sim(X)
 
-			for member in range(n_members):
+			#for member in range(n_members):
 
-				if not use_regression:
-					#results evaluated using classificaiton scores
+			#	if not use_regression:
+			#		#results evaluated using classificaiton scores
 
-					y_pred = np.argmax(Y[member],axis=1).flatten()
-					y_true = np.argmax(T,axis=1).flatten()
+			#		y_pred = np.argmax(Y[member],axis=1).flatten()
+			#		y_true = np.argmax(T,axis=1).flatten()
 
-					y_prob = Y[member,:,:].flatten()
-					y_class = T.flatten()
+			#		y_prob = Y[member,:,:].flatten()
+			#		y_class = T.flatten()
 
-					scores['acc'].append(metrics.accuracy_score(y_true,y_pred))
-					scores['f1'].append(metrics.f1_score(y_true,y_pred,average='macro'))
-					scores['hamming'].append(metrics.hamming_loss(y_true,y_pred))
-					scores['prec'].append(metrics.precision_score(y_true,y_pred,average='macro'))
-					scores['recall'].append(metrics.recall_score(y_true,y_pred,average='macro'))
-					scores['mcc'].append(metrics.matthews_corrcoef(y_true,y_pred))
-					#scores['jac'].append(metrics.jaccard_similarity_score(y_true,y_pred))
-					scores['jac'].append(metrics.jaccard_score(y_true,y_pred,average='macro'))
+			#		scores['acc'].append(metrics.accuracy_score(y_true,y_pred))
+			#		scores['f1'].append(metrics.f1_score(y_true,y_pred,average='macro'))
+			#		scores['hamming'].append(metrics.hamming_loss(y_true,y_pred))
+			#		scores['prec'].append(metrics.precision_score(y_true,y_pred,average='macro'))
+			#		scores['recall'].append(metrics.recall_score(y_true,y_pred,average='macro'))
+			#		scores['mcc'].append(metrics.matthews_corrcoef(y_true,y_pred))
+			#		#scores['jac'].append(metrics.jaccard_similarity_score(y_true,y_pred))
+			#		scores['jac'].append(metrics.jaccard_score(y_true,y_pred,average='macro'))
 				
-					if np.any(y_prob < 0) or np.any(y_prob > 1):
-						scores['auc_roc'].append(0)
-						scores['brier'].append(1)
-					else:
-						scores['auc_roc'].append(metrics.roc_auc_score(y_class,y_prob))
-						scores['brier'].append(metrics.brier_score_loss(y_class,y_prob))
-				else:
-					#results evaulated using regression scores
-					y_true = T.flatten()
-					y_pred = Y[member].flatten()
+			#		if np.any(y_prob < 0) or np.any(y_prob > 1):
+			#			scores['auc_roc'].append(0)
+			#			scores['brier'].append(1)
+			#		else:
+			#			scores['auc_roc'].append(metrics.roc_auc_score(y_class,y_prob))
+			#			scores['brier'].append(metrics.brier_score_loss(y_class,y_prob))
+			#	else:
+			#		#results evaulated using regression scores
+			#		y_true = T.flatten()
+			#		y_pred = Y[member].flatten()
 
-					if any(np.isnan(y_pred)):
-						scores['mse'].append(np.inf)
-						scores['mae'].append(np.inf)
-						scores['r2'].append(0)
-						scores['msle'].append(np.inf)
-					else:
-						scores['mse'].append(metrics.mean_squared_error(y_true,y_pred))
-						scores['mae'].append(metrics.mean_absolute_error(y_true,y_pred))
-						scores['r2'].append(metrics.r2_score(y_true,y_pred))
+			#		if any(np.isnan(y_pred)):
+			#			scores['mse'].append(np.inf)
+			#			scores['mae'].append(np.inf)
+			#			scores['r2'].append(0)
+			#			scores['msle'].append(np.inf)
+			#		else:
+			#			scores['mse'].append(metrics.mean_squared_error(y_true,y_pred))
+			#			scores['mae'].append(metrics.mean_absolute_error(y_true,y_pred))
+			#			scores['r2'].append(metrics.r2_score(y_true,y_pred))
 						
-						try:
-							scores['msle'].append(metrics.mean_squared_log_error(y_true,y_pred))
-						except:
-							scores['msle'].append(np.inf)
+			#			try:
+			#				scores['msle'].append(metrics.mean_squared_log_error(y_true,y_pred))
+			#			except:
+			#				scores['msle'].append(np.inf)
+
+			scores = Pynet.Utils.Score(self,X,T,use_regression=use_regression)
 
 			training_results = {
 				'epochs': epoch,
@@ -1247,6 +1249,91 @@ class Pynet:
 					feed_dict['X_tf:0'] = X
 
 			return feed_dict,n_steps,step_dict
+
+		def Score(net,X: np.array,T: np.array,use_regression=False):
+			"""Use common scoring methods for the performance/evaluation of a Pynet.
+			Args:
+				net (Pynet):
+				X (np.array):
+				T (np.array):
+				use_regression (bool):
+			Returns:
+				dict: scores
+			"""
+
+			#determine if pynet is single net or group of nets
+			isGroup,sample_dim,n_members = Pynet.Utils.DetermineGroup(net)
+
+			if not use_regression:
+				scores = {
+					'acc': [],
+					'f1': [],
+					'hamming': [],
+					'prec': [],
+					'recall': [],
+					'auc_roc': [],
+					'brier': [],
+					'mcc': [],
+					'jac': []
+					}
+			else:
+				scores = {
+					'mse': [],
+					'mae': [],
+					'msle': [],
+					'r2': []
+					}
+
+			#simulate an output signal
+			Y = net.Sim(X)
+
+			for member in range(n_members):
+
+				if not use_regression:
+					#results evaluated using classificaiton scores
+
+					y_pred = np.argmax(Y[member],axis=1).flatten()
+					y_true = np.argmax(T,axis=1).flatten()
+
+					y_prob = Y[member,:,:].flatten()
+					y_class = T.flatten()
+
+					scores['acc'].append(metrics.accuracy_score(y_true,y_pred))
+					scores['f1'].append(metrics.f1_score(y_true,y_pred,average='macro'))
+					scores['hamming'].append(metrics.hamming_loss(y_true,y_pred))
+					scores['prec'].append(metrics.precision_score(y_true,y_pred,average='macro'))
+					scores['recall'].append(metrics.recall_score(y_true,y_pred,average='macro'))
+					scores['mcc'].append(metrics.matthews_corrcoef(y_true,y_pred))
+					#scores['jac'].append(metrics.jaccard_similarity_score(y_true,y_pred))
+					scores['jac'].append(metrics.jaccard_score(y_true,y_pred,average='macro'))
+				
+					if np.any(y_prob < 0) or np.any(y_prob > 1):
+						scores['auc_roc'].append(0)
+						scores['brier'].append(1)
+					else:
+						scores['auc_roc'].append(metrics.roc_auc_score(y_class,y_prob))
+						scores['brier'].append(metrics.brier_score_loss(y_class,y_prob))
+				else:
+					#results evaulated using regression scores
+					y_true = T.flatten()
+					y_pred = Y[member].flatten()
+
+					if any(np.isnan(y_pred)): #any invalid outputs makes entire score the worst possible
+						scores['mse'].append(np.inf)
+						scores['mae'].append(np.inf)
+						scores['r2'].append(0)
+						scores['msle'].append(np.inf)
+					else:
+						scores['mse'].append(metrics.mean_squared_error(y_true,y_pred))
+						scores['mae'].append(metrics.mean_absolute_error(y_true,y_pred))
+						scores['r2'].append(metrics.r2_score(y_true,y_pred))
+						
+						try:
+							scores['msle'].append(metrics.mean_squared_log_error(y_true,y_pred))
+						except:
+							scores['msle'].append(np.inf)
+
+			return scores
 
 	class DNA:
 		"""Sub class of Pynet for managing genetic instructions.
