@@ -1766,7 +1766,7 @@ class Pynet:
 				'divideFcn': net['divideFcn'],
 				'divideParams': net['divideParam'],
 				'showCommandLine': net['trainParam']['showCommandLine'],
-				'show': net['trainParam']['show'],
+				#'show': net['trainParam']['show'],
 				'epochs': net['trainParam']['epochs'],
 				#'time': net['trainParam']['time'],
 				'goal': net['trainParam']['goal'],
@@ -1774,7 +1774,7 @@ class Pynet:
 				'max_fail': net['trainParam']['max_fail'],
 				#'sigma': net['trainParam']['sigma'],
 				#'lambda': net['trainParam']['lambda']
-				'learning_rate': 0.01 #TODO: net['biases'][L]['learnParam']['lr']
+				'learning_rate': net['trainParam']['learning_rate'],#0.01 #TODO: net['biases'][L]['learnParam']['lr']
 				})
 
 			#extract params for each layer
