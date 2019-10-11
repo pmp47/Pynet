@@ -898,10 +898,11 @@ class Pynet:
 
 		return Pynet.DNA.Form(best_dna,groupSize,useGPU,n_features,n_classes)
 
-	def MemberOut(self,out: int):
+	def MemberOut(self,out: int,do_configure=True):
 		"""Pull a member out of this Pynet.
 		Args:
 			out (int): Member by index
+			do_configure (bool): Automatically configure the member network after outing it.
 		Returns:
 			Pynet: member
 		"""
@@ -930,14 +931,14 @@ class Pynet:
 		#the preprocessor settings must remain the same
 		member.preProcessor.settings = self.preProcessor.settings
 
-		member.ConfigureGraph()
+		if do_configure: member.ConfigureGraph()
 		return member
 
 	def AppendMember(self,member,do_configure=True):
 		"""Append a Pynet to this Pynetgroup as a new member.
 		Args:
 			member (Pynet): Identical DNA pynet to add to this group
-			do_configure (bool): Automatically configure this network after adding new member
+			do_configure (bool): Automatically configure this network after adding new member.
 		Notes:
 			Appends entire group in member, so if only want to append a single network, first MemberOut it.
 		"""
