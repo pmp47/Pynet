@@ -933,10 +933,11 @@ class Pynet:
 		member.ConfigureGraph()
 		return member
 
-	def AppendMember(self,member):
+	def AppendMember(self,member,do_configure=True):
 		"""Append a Pynet to this Pynetgroup as a new member.
 		Args:
-			member (Pynet): 
+			member (Pynet): Identical DNA pynet to add to this group
+			do_configure (bool): Automatically configure this network after adding new member
 		Notes:
 			Appends entire group in member, so if only want to append a single network, first MemberOut it.
 		"""
@@ -964,7 +965,7 @@ class Pynet:
 
 			self.layers[L].bias = np.vstack((self.layers[L].bias,member.layers[L].bias))
 
-		self.ConfigureGraph()
+		if do_configure: self.ConfigureGraph()
 		return self
 
 	class Utils:
