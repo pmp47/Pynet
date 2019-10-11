@@ -448,24 +448,42 @@ class Pynet:
 		"""
 			
 		#determine if pynet is single net or group of nets
-		isGroup,sample_dim,n_members = Pynet.Utils.DetermineGroup(self)
+		isGroup,_,n_members = Pynet.Utils.DetermineGroup(self)
 				
 		#get shapes of members/samples/features/outputs
-		input_shape = np.shape(X)
-		target_shape = np.shape(T)
+		input_shape = X.shape
+		target_shape = T.shape
 
+		#fixes inputs where only 1 feature or class but still need singleton dim
 		if len(target_shape) == 1:
 			T = np.expand_dims(T,1)
-			target_shape = np.shape(T)
+			target_shape = T.shape
+		if len(input_shape) == 1:
+			X = np.expand_dims(X,1)
+			input_shape = X.shape
+
+		#check that the dim count of the X,T are the same
+		if len(input_shape) != len(target_shape):
+			raise ValueError('The amount of dimensions in the X input and T target must be the same')
 			
-		self.n_features = input_shape[1]
-		self.n_classes = target_shape[1]
+		#determine if X,T is jsut samples, or also samples for each member
+		if len(target_shape) == 2:
+			sample_dim = 0
+			has_members_dim = False
+		elif len(target_shape) == 3:
+			sample_dim = 1
+			has_members_dim = True
+		else:
+			raise ValueError('incompatiable X,T shapes?')
+
+		self.n_features = input_shape[sample_dim+1]
+		self.n_classes = target_shape[sample_dim+1]
 
 		#cannot use classification default if only a single class
 		if not use_regression and self.n_classes == 1:
 			use_regression = True
 
-		n_samples = input_shape[0]
+		#n_samples = input_shape[sample_dim]
 
 		#set output layer n_nodes to correct n_classes
 		self.layers[np.argmax(np.array(self.isOutput))].n_nodes = self.n_classes
@@ -474,7 +492,7 @@ class Pynet:
 		Xt,Xv,Xs,Tt,Tv,Ts = DatasetDivider.DNA.fcns[self.trainer.divideFcn](X,T,self.trainer.divideParams['trainRatio'],self.trainer.divideParams['valRatio'],self.trainer.divideParams['testRatio'])
 
 		#vertical stack if workign on group
-		if isGroup:
+		if isGroup and not has_members_dim:
 
 			#add member dim
 			Xtd = np.expand_dims(Xt,axis=0)
@@ -525,8 +543,21 @@ class Pynet:
 				}
 			Ts = TTs
 			Xs = XXs
-		else:
+		elif not isGroup:
 			raise ValueError('double check this')
+			training_dict = {
+				'X_tf:0': Xt,
+				'T_tf:0': Tt
+				}
+			validation_dict = {
+				'X_tf:0': Xv,
+				'T_tf:0': Tv
+				}
+			testing_dict = {
+				'X_tf:0': Xs,
+				'T_tf:0': Ts
+				}
+		else:
 			training_dict = {
 				'X_tf:0': Xt,
 				'T_tf:0': Tt
@@ -605,13 +636,34 @@ class Pynet:
 				self.layers[L].bias = b #b should be correct no matter - unless connecting layer as input isnt correct size
 
 		#establish preprocessing settings from data
-		if dynamic_preprocessing:
+		if dynamic_preprocessing and not has_members_dim:
+			#x_shapes -> [n_features,]
 			self.preProcessor.settings.xmax = np.max(X,axis=0)
 			self.preProcessor.settings.xmin = np.min(X,axis=0)
-			self.preProcessor.settings.ymax = np.array([np.max(T)],np.float32)
-			self.preProcessor.settings.ymin = np.array([np.min(T) - 1],np.float32) #-1 because iported is -1, but this result is 0 --> why? sometimes onehot data doesnt have 0?
 			self.preProcessor.settings.xmean = np.mean(X,axis=0)
 			self.preProcessor.settings.xstd = np.std(X,axis=0)
+			#y_shapes -> [n_classes,]
+			self.preProcessor.settings.ymax = np.array([np.max(T)],np.float32)
+			self.preProcessor.settings.ymin = np.array([np.min(T)],np.float32)
+			#-1 because iported is -1, but this result is 0 --> why? sometimes onehot data doesnt have 0?
+			#this shouldnt be done here -> let the user control input, if all the same class
+			#will raise error after to notify they output is all the same value
+
+		elif dynamic_preprocessing and has_members_dim:
+
+			X_reshaped = X.reshape((input_shape[0]*input_shape[1],input_shape[2]))
+			T_reshaped = T.reshape((target_shape[0]*target_shape[1],target_shape[2]))
+			#x_shapes -> [n_features,]
+			self.preProcessor.settings.xmax = np.max(X_reshaped,axis=0)
+			self.preProcessor.settings.xmin = np.min(X_reshaped,axis=0)
+			self.preProcessor.settings.xmean = np.mean(X_reshaped,axis=0)
+			self.preProcessor.settings.xstd = np.std(X_reshaped,axis=0)
+			#y_shapes -> [n_classes,]
+			self.preProcessor.settings.ymax = np.array([np.max(T_reshaped)],np.float32)
+			self.preProcessor.settings.ymin = np.array([np.min(T_reshaped)],np.float32)
+			
+		if self.preProcessor.settings.ymax == self.preProcessor.settings.ymin:
+			raise ValueError('Target only has 1 class/single value')
 
 		self.ConfigureGraph()
 			
@@ -705,76 +757,8 @@ class Pynet:
 				loss = validation_loss_last.tolist()
 			except: #inf will be float not np.float32
 				loss = validation_loss_last
-
-			#if not use_regression:
-			#	scores = {
-			#		'acc': [],
-			#		'f1': [],
-			#		'hamming': [],
-			#		'prec': [],
-			#		'recall': [],
-			#		'auc_roc': [],
-			#		'brier': [],
-			#		'mcc': [],
-			#		'jac': []
-			#		}
-			#else:
-			#	scores = {
-			#		'mse': [],
-			#		'mae': [],
-			#		'msle': [],
-			#		'r2': []
-			#		}
-
-			##simulate an output signal
-			#Y = self.Sim(X)
-
-			#for member in range(n_members):
-
-			#	if not use_regression:
-			#		#results evaluated using classificaiton scores
-
-			#		y_pred = np.argmax(Y[member],axis=1).flatten()
-			#		y_true = np.argmax(T,axis=1).flatten()
-
-			#		y_prob = Y[member,:,:].flatten()
-			#		y_class = T.flatten()
-
-			#		scores['acc'].append(metrics.accuracy_score(y_true,y_pred))
-			#		scores['f1'].append(metrics.f1_score(y_true,y_pred,average='macro'))
-			#		scores['hamming'].append(metrics.hamming_loss(y_true,y_pred))
-			#		scores['prec'].append(metrics.precision_score(y_true,y_pred,average='macro'))
-			#		scores['recall'].append(metrics.recall_score(y_true,y_pred,average='macro'))
-			#		scores['mcc'].append(metrics.matthews_corrcoef(y_true,y_pred))
-			#		#scores['jac'].append(metrics.jaccard_similarity_score(y_true,y_pred))
-			#		scores['jac'].append(metrics.jaccard_score(y_true,y_pred,average='macro'))
 				
-			#		if np.any(y_prob < 0) or np.any(y_prob > 1):
-			#			scores['auc_roc'].append(0)
-			#			scores['brier'].append(1)
-			#		else:
-			#			scores['auc_roc'].append(metrics.roc_auc_score(y_class,y_prob))
-			#			scores['brier'].append(metrics.brier_score_loss(y_class,y_prob))
-			#	else:
-			#		#results evaulated using regression scores
-			#		y_true = T.flatten()
-			#		y_pred = Y[member].flatten()
-
-			#		if any(np.isnan(y_pred)):
-			#			scores['mse'].append(np.inf)
-			#			scores['mae'].append(np.inf)
-			#			scores['r2'].append(0)
-			#			scores['msle'].append(np.inf)
-			#		else:
-			#			scores['mse'].append(metrics.mean_squared_error(y_true,y_pred))
-			#			scores['mae'].append(metrics.mean_absolute_error(y_true,y_pred))
-			#			scores['r2'].append(metrics.r2_score(y_true,y_pred))
-						
-			#			try:
-			#				scores['msle'].append(metrics.mean_squared_log_error(y_true,y_pred))
-			#			except:
-			#				scores['msle'].append(np.inf)
-
+			#assess various scores of the training
 			scores = Pynet.Utils.Score(self,X,T,use_regression=use_regression)
 
 			training_results = {
@@ -1205,6 +1189,7 @@ class Pynet:
 			#build feed dict
 			if net.isRecurrent: #this net is recurrent and requires sequential step reading
 				useXX = 0
+				raise ValueError('untested')
 				#vertical stack if working on group
 				if isGroup:
 					if len(np.shape(X)) == 3: #X data already presented for member consumption
@@ -1254,7 +1239,7 @@ class Pynet:
 			"""Use common scoring methods for the performance/evaluation of a Pynet.
 			Args:
 				net (Pynet):
-				X (np.array):
+				X (np.array): 
 				T (np.array):
 				use_regression (bool):
 			Returns:
@@ -1286,25 +1271,28 @@ class Pynet:
 
 			#simulate an output signal
 			Y = net.Sim(X)
-
+			
 			for member in range(n_members):
-
 				if not use_regression:
 					#results evaluated using classificaiton scores
 
 					y_pred = np.argmax(Y[member],axis=1).flatten()
-					y_true = np.argmax(T,axis=1).flatten()
-
 					y_prob = Y[member,:,:].flatten()
-					y_class = T.flatten()
 
+					if len(T.shape) == 3:
+						#T has n_members dim
+						y_class = T[member].flatten()
+						y_true = np.argmax(T[member],axis=1).flatten()
+					else:
+						y_class = T.flatten()
+						y_true = np.argmax(T,axis=1).flatten()
+					
 					scores['acc'].append(metrics.accuracy_score(y_true,y_pred))
 					scores['f1'].append(metrics.f1_score(y_true,y_pred,average='macro'))
 					scores['hamming'].append(metrics.hamming_loss(y_true,y_pred))
 					scores['prec'].append(metrics.precision_score(y_true,y_pred,average='macro'))
 					scores['recall'].append(metrics.recall_score(y_true,y_pred,average='macro'))
 					scores['mcc'].append(metrics.matthews_corrcoef(y_true,y_pred))
-					#scores['jac'].append(metrics.jaccard_similarity_score(y_true,y_pred))
 					scores['jac'].append(metrics.jaccard_score(y_true,y_pred,average='macro'))
 				
 					if np.any(y_prob < 0) or np.any(y_prob > 1):
@@ -1315,8 +1303,13 @@ class Pynet:
 						scores['brier'].append(metrics.brier_score_loss(y_class,y_prob))
 				else:
 					#results evaulated using regression scores
-					y_true = T.flatten()
 					y_pred = Y[member].flatten()
+
+					if len(T.shape) == 3:
+						#T has n_members dim
+						y_true = T[member].flatten()
+					else:
+						y_true = T.flatten()
 
 					if any(np.isnan(y_pred)): #any invalid outputs makes entire score the worst possible
 						scores['mse'].append(np.inf)
@@ -3176,6 +3169,41 @@ class DatasetDivider:
 		#percentage check
 		tp,vp,sp = DatasetDivider.Format_Percentages(tp,vp,sp)
 			
+		#if the data comes in as dims with n_members
+		if len(X.shape) == 3:
+			#split training out in random manner
+			Xt, Xs, Tt, Ts = train_test_split(X[0], T[0], test_size=(1-tp))
+
+			#split validation and test from remainder in random manner
+			Xs, Xv, Ts, Tv = train_test_split(Xs, Ts, test_size=(vp/(1-tp)))
+
+
+			Xt_s = np.expand_dims(Xt,0)
+			Xs_s = np.expand_dims(Xs,0)
+			Xv_s = np.expand_dims(Xv,0)
+
+			Tt_s = np.expand_dims(Tt,0)
+			Ts_s = np.expand_dims(Ts,0)
+			Tv_s = np.expand_dims(Tv,0)
+
+			for m in range(1,X.shape[0]):
+
+				#split training out in random manner
+				Xt, Xs, Tt, Ts = train_test_split(X[0], T[0], test_size=(1-tp))
+
+				#split validation and test from remainder in random manner
+				Xs, Xv, Ts, Tv = train_test_split(Xs, Ts, test_size=(vp/(1-tp)))
+
+				Xt_s = np.vstack((Xt_s,np.expand_dims(Xt,0)))
+				Xs_s = np.vstack((Xs_s,np.expand_dims(Xs,0)))
+				Xv_s = np.vstack((Xv_s,np.expand_dims(Xv,0)))
+
+				Tt_s = np.vstack((Tt_s,np.expand_dims(Tt,0)))
+				Ts_s = np.vstack((Ts_s,np.expand_dims(Ts,0)))
+				Tv_s = np.vstack((Tv_s,np.expand_dims(Tv,0)))
+
+			return Xt_s,Xv_s,Xs_s,Tt_s,Tv_s,Ts_s
+
 		#split training out in random manner
 		Xt, Xs, Tt, Ts = train_test_split(X, T, test_size=(1-tp))
 
@@ -3201,23 +3229,41 @@ class DatasetDivider:
 			np.array: Ts
 		"""
 
+		#TODO: fix sample dim when n_members is first dim
+
 		#percentage check
 		tp,vp,sp = DatasetDivider.Format_Percentages(tp,vp,sp)
 
-		#get total number of samples
-		n_samples = np.shape(X)[0]
+		if len(X.shape) == 3:
+			#get total number of samples
+			n_samples = np.shape(X)[1]
 
-		#split in forward manner based on percentage
-		tp_ind = int(np.round(tp * n_samples))
-		vp_ind = int(tp_ind + np.round(vp * n_samples))
+			#split in forward manner based on percentage
+			tp_ind = int(np.round(tp * n_samples))
+			vp_ind = int(tp_ind + np.round(vp * n_samples))
 			
-		Xt = X[0:tp_ind]
-		Xv = X[tp_ind:vp_ind]
-		Xs = X[vp_ind:]
+			Xt = X[:,0:tp_ind]
+			Xv = X[:,tp_ind:vp_ind]
+			Xs = X[:,vp_ind:]
 
-		Tt = T[0:tp_ind]
-		Tv = T[tp_ind:vp_ind]
-		Ts = T[vp_ind:]
+			Tt = T[:,0:tp_ind]
+			Tv = T[:,tp_ind:vp_ind]
+			Ts = T[:,vp_ind:]
+		else:
+			#get total number of samples
+			n_samples = np.shape(X)[0]
+
+			#split in forward manner based on percentage
+			tp_ind = int(np.round(tp * n_samples))
+			vp_ind = int(tp_ind + np.round(vp * n_samples))
+			
+			Xt = X[0:tp_ind]
+			Xv = X[tp_ind:vp_ind]
+			Xs = X[vp_ind:]
+
+			Tt = T[0:tp_ind]
+			Tv = T[tp_ind:vp_ind]
+			Ts = T[vp_ind:]
 
 		return Xt,Xv,Xs,Tt,Tv,Ts
 
