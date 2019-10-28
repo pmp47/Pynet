@@ -75,6 +75,25 @@ class Pynet:
 
 		return super().__init__()
 
+	def __eq__(self,other):
+
+		comparison_bools = []
+		comparison_bools.append(Pynet.DNA.Extract(self) == Pynet.DNA.Extract(other))
+
+		comparison_bools.append(self.preProcessor == other.preProcessor)
+		comparison_bools.append(self.trainer == other.trainer)
+		comparison_bools.append(self.isInput == other.isInput)
+		comparison_bools.append(self.isOutput == other.isOutput)
+		comparison_bools.append(self.layerConnect == other.layerConnect)
+
+		for l in list(self.layers.keys()):
+			comparison_bools.append(self.layers[l] == other.layers[l])
+
+		comparison_bools.append(self.n_features == other.n_features)
+		comparison_bools.append(self.n_classes == other.n_classes)
+
+		return all(comparison_bools)
+
 	def Dictify(self):
 		"""Transform this pynet into a dict for saving.
 		Returns:
@@ -207,8 +226,11 @@ class Pynet:
 			os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 				
 		else:
+			#prevents allocating gpu memory 
+			#https://stackoverflow.com/questions/44552585/prevent-tensorflow-from-accessing-the-gpu
+			#but only if before tf import?
 			device = '/device:CPU:0'
-			os.environ["CUDA_VISIBLE_DEVICES"] = "-1" #prevents allocating gpu memory
+			os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 			
 		#build graph
 		g = tf.Graph()
@@ -320,7 +342,9 @@ class Pynet:
 			'xmax_tf:0': self.preProcessor.settings.xmax,
 			'xmin_tf:0': self.preProcessor.settings.xmin,
 			'ymax_tf:0': self.preProcessor.settings.ymax,
-			'ymin_tf:0': self.preProcessor.settings.ymin
+			'ymin_tf:0': self.preProcessor.settings.ymin,
+			'xmean_tf:0': self.preProcessor.settings.xmean,
+			'xstd_tf:0': self.preProcessor.settings.xstd,
 			}
 
 		#X must have a singleton dim
@@ -1384,16 +1408,18 @@ class Pynet:
 			processFcn,next_gene_starts_idx = PreProcess.DNA.Read_Gene(genes,next_gene_starts_idx)
 
 			#performance fcn
-			performFcn,next_gene_starts_idx = Performance.DNA.Read_Gene(genes,next_gene_starts_idx)
+			#performFcn,next_gene_starts_idx = Performance.DNA.Read_Gene(genes,next_gene_starts_idx)
 				
 			#training fcn
-			trainFcn,goal,max_fail,epochs,learning_rate,min_grad,next_gene_starts_idx = Training.DNA.Read_Gene(genes,next_gene_starts_idx)
+			performFcn,trainFcn,goal,max_fail,epochs,learning_rate,min_grad,next_gene_starts_idx = \
+				Training.DNA.Read_Gene(genes,next_gene_starts_idx)
 
 			#dataset divide fcn and didve params
 			divideFcn,divideParams,next_gene_starts_idx = DatasetDivider.DNA.Read_Gene(genes,next_gene_starts_idx)
 
 			#layers and input/output/connections
-			layers,isInput,isOutput,layerConnect,next_gene_starts_idx = Layer.DNA.Read_Gene(groupSize,n_features,genes,next_gene_starts_idx)
+			layers,isInput,isOutput,layerConnect,next_gene_starts_idx = \
+				Layer.DNA.Read_Gene(groupSize,n_features,genes,next_gene_starts_idx)
 				
 			#create pynet
 			preProcessor = PreProcess({
@@ -1450,16 +1476,18 @@ class Pynet:
 			genes = ''
 
 			#preprocess fcn
-			genes = genes + PreProcess.DNA.Write_Gene(net)
+			genes = genes + PreProcess.DNA.Write_Gene(net.preProcessor.processFcn)
 
 			#performance fcn
-			genes = genes + Performance.DNA.Write_Gene(net)
+			#genes += Performance.DNA.Write_Gene(net.trainer.performFcn)
 
 			#train fcn
-			genes = genes + Training.DNA.Write_Gene(net)
+			genes += Training.DNA.Write_Gene(net.trainer.performFcn,\
+				net.trainer.trainFcn,net.trainer.goal,net.trainer.max_fail,net.trainer.epochs,\
+				net.trainer.learning_rate,net.trainer.min_grad)
 
 			#divide fcn and divide params
-			genes = genes + DatasetDivider.DNA.Write_Gene(net.trainer.divideFcn,net.trainer.divideParams)
+			genes += DatasetDivider.DNA.Write_Gene(net.trainer.divideFcn,net.trainer.divideParams)
 
 			#layer count
 			genes = genes + npe.Int2Bin(len(net.layers),Layer.DNA.n_layer_bits())
@@ -1576,7 +1604,7 @@ class Pynet:
 		def Rand(n_classes: int):
 			"""Randomly generate dna for a Pynet.
 			Args:
-				n_classes (int): Number of classes/distinct features of the pynet to generate.
+				n_classes (int): Number of classes/targets of the pynet to output.
 			Returns:
 				int: dna
 			"""
@@ -1587,57 +1615,14 @@ class Pynet:
 			n_nodes_bits = Layer.DNA.n_nodes_bits()
 			n_layers_bits = Layer.DNA.n_layer_bits()
 
-		
-			#1) generate overarching network params
 			#preprocess fcn
-			preproc_gene = int(np.random.randint(len(PreProcess.DNA.fcns),size=1))
-			genes = genes + npe.Int2Bin(preproc_gene,PreProcess.DNA.pre_process_bits)
+			genes += PreProcess.DNA.Rand()
 
-			#performance fcn
-			perf_gene = int(np.random.randint(len(Performance.DNA.fcns),size=1))
-			genes = genes + npe.Int2Bin(perf_gene,Performance.DNA.perform_fcn_bits)
+			#trainer genes
+			genes += Training.DNA.Rand()
 
-			#train fcn
-			train_gene = int(np.random.randint(len(Training.DNA.fcns),size=1))
-			genes = genes + npe.Int2Bin(train_gene,Training.DNA.train_fcn_bits)
-
-			#train loss goal
-			if Performance.DNA.genes[perf_gene] == 'crossentropy':
-				goal_gene = 0 #cross entropy will depend on groupsize so goal is inconsequential
-			else:
-				goal_gene = int(np.random.randint(0,high=31,size=1)) #inverse of error goal ie 25 = 75% goal
-			genes = genes + npe.Int2Bin(goal_gene,Training.DNA.goal_bits)
-
-			#max validation fails
-			max_fail_gene = int(np.random.randint(4,high=Training.DNA.max_fail_bits,size=1))
-			genes = genes + npe.Int2Bin(max_fail_gene,Training.DNA.max_fail_bits)
-
-			#epoch limit
-			epoch_gene = int(np.random.randint(1000,high=2**Training.DNA.epoch_bits,size=1))
-			genes = genes + npe.Int2Bin(epoch_gene,Training.DNA.epoch_bits)
-
-			#learning rate
-			lr_gene = int(np.random.randint(1,high=101,size=1))
-			genes = genes + npe.Int2Bin(lr_gene,Training.DNA.learning_rate_bits)
-
-			#min gradient epsilon
-			ep_gene = int(np.random.randint(1,high=2**Training.DNA.min_grad_bits,size=1))
-			genes = genes + npe.Int2Bin(ep_gene,Training.DNA.min_grad_bits)
-
-			#divide Fcn
-			divideFcn_gene = int(np.random.randint(len(DatasetDivider.DNA.fcns),size=1))
-			genes = genes + npe.Int2Bin(divideFcn_gene,DatasetDivider.DNA.divideFcn_bits)
-
-			#divide Params
-			tp = 0;	vp = 0;	sp = 0
-			while ((tp + vp + sp) != 100) or (tp < vp) or (tp < sp):
-				tp = int(np.random.randint(5,high=91,size=1)) #max training is 90%
-				vp = int(np.random.randint(5,high=(100 - tp - 4),size=1)) #max val leaves 1% for test
-				sp = 100 - tp - vp
-			genes = genes + npe.Int2Bin(tp,int(DatasetDivider.DNA.divideParams_bits / 3))
-			genes = genes + npe.Int2Bin(vp,int(DatasetDivider.DNA.divideParams_bits / 3))
-			genes = genes + npe.Int2Bin(sp,int(DatasetDivider.DNA.divideParams_bits / 3))
-
+			#datasetdivider genes
+			genes += DatasetDivider.DNA.Rand()
 
 			#2) generate layer count gene
 			n_layers = int(np.random.randint(2,Layer.DNA.n_layers_max + 1,size=1))
@@ -1926,9 +1911,14 @@ class Training:
 	def __init__(self, kwargs):
 
 		self.performFcn = kwargs['performFcn']
-		self.trainFcn = kwargs['trainFcn']
+		
 		self.divideFcn = kwargs['divideFcn']
 		self.divideParams = kwargs['divideParams']
+		#tp = divideParams['trainRatio']
+		#vp = divideParams['valRatio']
+		#sp = divideParams['testRatio']
+
+		self.trainFcn = kwargs['trainFcn']
 		self.epochs = kwargs['epochs']
 		#self.time = kwargs['time']
 		self.goal = kwargs['goal']
@@ -1943,6 +1933,23 @@ class Training:
 		#self.show = kwargs['show']
 			
 		return super().__init__()
+
+	def __eq__(self,other):
+		
+		comparison_bools = []
+		comparison_bools.append(self.performFcn == other.performFcn)
+		comparison_bools.append(self.divideFcn == other.divideFcn)
+		comparison_bools.append(self.divideParams['trainRatio'] == other.divideParams['trainRatio'])
+		comparison_bools.append(self.divideParams['valRatio'] == other.divideParams['valRatio'])
+		comparison_bools.append(self.divideParams['testRatio'] == other.divideParams['testRatio'])
+		comparison_bools.append(self.trainFcn == other.trainFcn)
+		comparison_bools.append(self.epochs == other.epochs)
+		comparison_bools.append(self.goal == other.goal)
+		comparison_bools.append(self.min_grad == other.min_grad)
+		comparison_bools.append(self.max_fail == other.max_fail)
+		comparison_bools.append(self.learning_rate == other.learning_rate)
+		
+		return all(comparison_bools)
 	
 	def Adam(min_grad: float,lr: float,loss_tf: tf.Tensor,var_list: list):
 		"""Adam optimization.
@@ -2082,10 +2089,16 @@ class Training:
 		learning_rate_bits = 10
 		min_grad_bits = 10
 
-		def Write_Gene(net: Pynet):
+		def Write_Gene(performFcn: str,trainFcn: str,goal: float,max_fail: int,epochs: int,learning_rate: float,min_grad: float):
 			"""Reads the pynet and returns the gene binary string for the training function.
 			Args:
-				net (Pynet): 
+				performFcn (str):
+				trainFcn (str):
+				goal (float):
+				max_fail (int):
+				epochs (int):
+				learning_rate (float):
+				min_grad (float):
 			Returns:
 				str: gene
 			Notes:
@@ -2095,13 +2108,15 @@ class Training:
 				why is rounding necessary? int doesnt round -> int(.29*100) == 28
 			"""
 
-			train_gene = list(Training.DNA.genes.keys())[list(Training.DNA.genes.values()).index(net.trainer.trainFcn)]
-			gene =  npe.Int2Bin(train_gene,Training.DNA.train_fcn_bits) + \
-				npe.Int2Bin(int(np.round(net.trainer.goal * 100)),Training.DNA.goal_bits) + \
-				npe.Int2Bin(net.trainer.max_fail,Training.DNA.max_fail_bits) + \
-				npe.Int2Bin(net.trainer.epochs,Training.DNA.epoch_bits) + \
-				npe.Int2Bin(int(np.round(net.trainer.learning_rate*1000)),Training.DNA.learning_rate_bits) + \
-				npe.Int2Bin(int(np.round(net.trainer.min_grad*1000000)),Training.DNA.min_grad_bits)
+			gene = Performance.DNA.Write_Gene(performFcn)
+
+			train_gene = list(Training.DNA.genes.keys())[list(Training.DNA.genes.values()).index(trainFcn)]
+			gene +=  npe.Int2Bin(train_gene,Training.DNA.train_fcn_bits) + \
+				npe.Int2Bin(int(np.round(goal * 100)),Training.DNA.goal_bits) + \
+				npe.Int2Bin(max_fail,Training.DNA.max_fail_bits) + \
+				npe.Int2Bin(epochs,Training.DNA.epoch_bits) + \
+				npe.Int2Bin(int(np.round(learning_rate*1000)),Training.DNA.learning_rate_bits) + \
+				npe.Int2Bin(int(np.round(min_grad*1000000)),Training.DNA.min_grad_bits)
 
 			return gene
 
@@ -2111,13 +2126,17 @@ class Training:
 				genes (str): Binary string representing a configuration.
 				next_gene_starts_idx (int): Index where the datasetdivider allele begins in the genes.
 			Returns
+				str: performFcn
 				str: trainFcn
+				float: goal
 				int: max_fail
 				int: epochs
 				float: learning_rate
 				float: min_grad
 				int: next_gene_starts_idx
 			"""
+
+			performFcn,next_gene_starts_idx = Performance.DNA.Read_Gene(genes,next_gene_starts_idx)
 
 			next_gene_ends_idx = next_gene_starts_idx + Training.DNA.train_fcn_bits
 			trainFcn = Training.DNA.genes[npe.Bin2Int(genes[next_gene_starts_idx:next_gene_ends_idx])]
@@ -2143,7 +2162,48 @@ class Training:
 			min_grad = npe.Bin2Int(genes[next_gene_starts_idx:next_gene_ends_idx]) / 1000000
 			next_gene_starts_idx = next_gene_ends_idx
 
-			return trainFcn,goal,max_fail,epochs,learning_rate,min_grad,next_gene_starts_idx
+			return performFcn,trainFcn,goal,max_fail,epochs,learning_rate,min_grad,next_gene_starts_idx
+
+		def Rand():
+			"""Randomly generate training genes.
+			Returns:
+				str: genes
+			"""
+
+			genes = ''
+
+			#performance function
+			perf_gene = Performance.DNA.Rand()
+			genes += perf_gene
+			
+			#train fcn
+			train_gene = int(np.random.randint(len(Training.DNA.fcns),size=1))
+			genes = genes + npe.Int2Bin(train_gene,Training.DNA.train_fcn_bits)
+
+			#train loss goal
+			if Performance.DNA.genes[npe.Bin2Int(perf_gene)] == 'crossentropy':
+				goal_gene = 0 #cross entropy will depend on groupsize so goal is inconsequential
+			else:
+				goal_gene = int(np.random.randint(0,high=31,size=1)) #inverse of error goal ie 25 = 75% goal
+			genes = genes + npe.Int2Bin(goal_gene,Training.DNA.goal_bits)
+
+			#max validation fails
+			max_fail_gene = int(np.random.randint(4,high=Training.DNA.max_fail_bits,size=1))
+			genes = genes + npe.Int2Bin(max_fail_gene,Training.DNA.max_fail_bits)
+
+			#epoch limit
+			epoch_gene = int(np.random.randint(1000,high=2**Training.DNA.epoch_bits,size=1))
+			genes = genes + npe.Int2Bin(epoch_gene,Training.DNA.epoch_bits)
+
+			#learning rate
+			lr_gene = int(np.random.randint(1,high=101,size=1))
+			genes = genes + npe.Int2Bin(lr_gene,Training.DNA.learning_rate_bits)
+
+			#min gradient epsilon
+			ep_gene = int(np.random.randint(1,high=2**Training.DNA.min_grad_bits,size=1))
+			genes = genes + npe.Int2Bin(ep_gene,Training.DNA.min_grad_bits)
+			
+			return genes
 
 class Layer:
 	"""Neuron layer for a Pynet.
@@ -2184,6 +2244,26 @@ class Layer:
 		self.lastState = None
 
 		return super().__init__()
+
+	def __eq__(self,other):
+		
+		comparison_bools = []
+		comparison_bools.append(self.transferFcn == other.transferFcn)
+		for i in range(len(self.inputWeights)):
+			if len(self.inputWeights[i]) > 0:
+				comparison_bools.append(all(self.inputWeights[i].flatten() == other.inputWeights[i].flatten()))
+		
+		for l in range(len(self.layerWeights)):
+			if len(self.layerWeights[l]) > 0:
+				comparison_bools.append(all(self.layerWeights[l].flatten() == other.layerWeights[l].flatten()))
+		
+		comparison_bools.append(self.weightFcn == other.weightFcn)
+		comparison_bools.append(all(self.bias.flatten() == other.bias.flatten()))
+		comparison_bools.append(self.inputFcn == other.inputFcn)
+		comparison_bools.append(self.initFcn == other.initFcn)
+		comparison_bools.append(self.n_nodes == other.n_nodes)
+
+		return all(comparison_bools)
 
 	def Dotprod(signal_tf: tf.Tensor,w_tf: tf.Tensor):
 		"""Activation computation function which uses the dot product of the signal and layer weights
@@ -2827,7 +2907,7 @@ class PreProcess:
 	"""Processing of data before signal input to the Pynet.
 	Args:
 		settings (processSettings): Specific settings for process used.
-		processFcn (str): 'mapminmax' | 'standardize'
+		processFcn (str): see PreProcess.DNA.fcns.key()
 	Ref:
 		https://www.mathworks.com/help/deeplearning/ug/choose-neural-network-input-output-processing-functions.html
 	TODO:
@@ -2841,6 +2921,14 @@ class PreProcess:
 		self.processFcn = kwargs['processFcn']
 
 		return super().__init__()
+
+	def __eq__(self,other):
+
+		comparison_bools = []
+		comparison_bools.append(self.settings == other.settings)
+		comparison_bools.append(self.processFcn == other.processFcn)
+		
+		return all(comparison_bools)
 
 	def Mapminmax(X_tf: tf.Tensor,xmax_tf: tf.Tensor,xmin_tf: tf.Tensor,ymax_tf: tf.Tensor,ymin_tf: tf.Tensor):
 		"""Normalize inputs to fall in the range [−1, 1]
@@ -2898,6 +2986,7 @@ class PreProcess:
 		Returns:
 			?X?X?
 		Ref:
+			http://scikit-learn.org/stable/auto_examples/preprocessing/plot_scaling_importance.html#sphx-glr-auto-examples-preprocessing-plot-scaling-importance-py
 			https://ewanlee.github.io/2018/01/17/PCA-With-Tensorflow/
 			https://gist.github.com/N-McA/bbbaed9d1a4b7c316f5d28cef1b96bdd
 			https://towardsdatascience.com/pca-using-python-scikit-learn-e653f8989e60
@@ -2934,6 +3023,16 @@ class PreProcess:
 
 		return result
 
+	def HilbertMapping():
+		"""Map the input using a hilbert curve to encode 2 dimensions into the position in the output vector.
+		Ref:
+			https://en.wikipedia.org/wiki/Hilbert_curve
+		Notes:
+			This is very helpful for images as the x,y coordinates of a pixel can vary depending on image resolution.
+		"""
+		raise NotImplementedError()
+		pass
+
 	class DNA:
 
 		fcns = {
@@ -2949,14 +3048,14 @@ class PreProcess:
 		
 		pre_process_bits = 8
 		
-		def Write_Gene(net: Pynet):
+		def Write_Gene(processFcn: str):
 			"""Writes the pynet's preprocess as a binary string.
 			Args:
-				net (Pynet): Pynet to write the preprocess gene of.
+				processFcn (str):
 			Returns
 				str: gene
 			"""
-			preproc_gene = list(PreProcess.DNA.genes.keys())[list(PreProcess.DNA.genes.values()).index(net.preProcessor.processFcn)]
+			preproc_gene = list(PreProcess.DNA.genes.keys())[list(PreProcess.DNA.genes.values()).index(processFcn)]
 			return npe.Int2Bin(preproc_gene,PreProcess.DNA.pre_process_bits)
 
 		def Read_Gene(genes: str,next_gene_starts_idx: int):
@@ -2972,6 +3071,18 @@ class PreProcess:
 			processFcn = PreProcess.DNA.genes[npe.Bin2Int(genes[next_gene_starts_idx:next_gene_ends_idx])]
 			next_gene_starts_idx = next_gene_ends_idx
 			return processFcn,next_gene_starts_idx
+
+		def Rand():
+			"""Randomly generate genes for a preprocess function.
+			Returns:
+				str: genes
+			"""
+			genes = ''
+
+			preproc_gene = int(np.random.randint(len(PreProcess.DNA.fcns),size=1))
+			genes += npe.Int2Bin(preproc_gene,PreProcess.DNA.pre_process_bits)
+
+			return genes
 
 class processSettings:
 	"""Settings for PreProcess functions
@@ -2993,6 +3104,18 @@ class processSettings:
 		self.xstd = kwargs['xstd']
 
 		return super().__init__()
+
+	def __eq__(self,other):
+		
+		comparison_bools = []
+		comparison_bools.append(all(self.xmax == other.xmax))
+		comparison_bools.append(all(self.xmin == other.xmin))
+		comparison_bools.append(all(self.ymax == other.ymax))
+		comparison_bools.append(all(self.ymin == other.ymin))
+		comparison_bools.append(all(self.xmean == other.xmean))
+		comparison_bools.append(all(self.xstd == other.xstd))
+		
+		return all(comparison_bools)
 
 class Performance:
 	"""Performance evaluation functions for assessing Pynet training session.
@@ -3072,12 +3195,12 @@ class Performance:
 	class DNA:
 
 		fcns = {
-		'crossentropy': lambda t,y: Performance.CrossEntropy(t,y),
-		'mse': lambda t,y: Performance.MSE(t,y),
-		'mae': lambda t,y: Performance.MAE(t,y),
-		'sse': lambda t,y: Performance.SSE(t,y),
-		'sae': lambda t,y: Performance.SAE(t,y)
-		}
+			'crossentropy': lambda t,y: Performance.CrossEntropy(t,y),
+			'mse': lambda t,y: Performance.MSE(t,y),
+			'mae': lambda t,y: Performance.MAE(t,y),
+			'sse': lambda t,y: Performance.SSE(t,y),
+			'sae': lambda t,y: Performance.SAE(t,y)
+			}
 
 		genes = {
 			0: 'crossentropy',
@@ -3089,15 +3212,15 @@ class Performance:
 
 		perform_fcn_bits = 8
 
-		def Write_Gene(net: Pynet):
+		def Write_Gene(performFcn: str):
 			"""Writes the pynet's Performance Function as a binary string.
 			Args:
-				net (Pynet): Pynet to write the performance gene of.
+				performFcn (str): Performance function.
 			Returns:
 				str: gene
 			"""
 
-			perf_gene = list(Performance.DNA.genes.keys())[list(Performance.DNA.genes.values()).index(net.trainer.performFcn)]
+			perf_gene = list(Performance.DNA.genes.keys())[list(Performance.DNA.genes.values()).index(performFcn)]
 			return npe.Int2Bin(perf_gene,Performance.DNA.perform_fcn_bits)
 
 		def Read_Gene(genes: str,next_gene_starts_idx: int):
@@ -3114,6 +3237,17 @@ class Performance:
 			performFcn = Performance.DNA.genes[npe.Bin2Int(genes[next_gene_starts_idx:next_gene_ends_idx])]
 			next_gene_starts_idx = next_gene_ends_idx
 			return performFcn,next_gene_starts_idx
+
+		def Rand():
+			"""Randomly generate genes for the performance function.
+			Returns:
+				str: genes
+			"""
+
+			perf_gene = int(np.random.randint(len(Performance.DNA.fcns),size=1))
+			genes = npe.Int2Bin(perf_gene,Performance.DNA.perform_fcn_bits)
+
+			return genes
 
 class DatasetDivider:
 	"""Class for dividing a dataset.
@@ -3302,9 +3436,9 @@ class DatasetDivider:
 			vp = divideParams['valRatio']
 			sp = divideParams['testRatio']
 			tp,vp,sp = DatasetDivider.Format_Percentages(tp,vp,sp) #format to float
-			train_gene = divideFcn_gene + npe.Int2Bin(int(divideParams['trainRatio']*100),int(DatasetDivider.DNA.divideParams_bits / 3))
-			val_gene = train_gene + npe.Int2Bin(int(divideParams['valRatio']*100),int(DatasetDivider.DNA.divideParams_bits / 3))
-			test_gene = val_gene + npe.Int2Bin(int(divideParams['testRatio']*100),int(DatasetDivider.DNA.divideParams_bits / 3))
+			train_gene = divideFcn_gene + npe.Int2Bin(int(np.round(divideParams['trainRatio']*100)),int(DatasetDivider.DNA.divideParams_bits / 3))
+			val_gene = train_gene + npe.Int2Bin(int(np.round(divideParams['valRatio']*100)),int(DatasetDivider.DNA.divideParams_bits / 3))
+			test_gene = val_gene + npe.Int2Bin(int(np.round(divideParams['testRatio']*100)),int(DatasetDivider.DNA.divideParams_bits / 3))
 
 			return test_gene
 
@@ -3344,52 +3478,148 @@ class DatasetDivider:
 			
 			return divideFcn,divideParams,next_gene_starts_idx
 
+		def Rand(max_training_perc=75):
+			"""Randomly generate a valid gene for a DatasetDivder.
+			Args:
+				max_training_perc (int): Max training percentage as an integer between [6,90]
+			Returns:
+				str: genes
+			"""
+
+			genes = ''
+
+			#divide Fcn
+			divideFcn_gene = int(np.random.randint(len(DatasetDivider.DNA.fcns),size=1))
+			genes = genes + npe.Int2Bin(divideFcn_gene,DatasetDivider.DNA.divideFcn_bits)
+
+			#divide Params
+			tp = 0;	vp = 0;	sp = 0
+			while ((tp + vp + sp) != 100) or (tp < vp) or (tp < sp):
+				tp = int(np.random.randint(5,high=max_training_perc+1,size=1))
+				vp = int(np.random.randint(5,high=(100 - tp - 4),size=1)) #max val leaves 4% for test
+				sp = 100 - tp - vp
+			genes = genes + npe.Int2Bin(tp,int(DatasetDivider.DNA.divideParams_bits / 3))
+			genes = genes + npe.Int2Bin(vp,int(DatasetDivider.DNA.divideParams_bits / 3))
+			genes = genes + npe.Int2Bin(sp,int(DatasetDivider.DNA.divideParams_bits / 3))
+
+			return genes
+
 class Tests:
 
 	def main():
 
 		Tests.test_datasetdivider()
+		Tests.test_datasetdivider_dna_loop()
+		Tests.test_training_dna_loop()
+		Tests.test_memberships()
+
 		Tests.dna_inport_export_works()
 		Tests.test_dna_forming_and_extracting()
 
 
 		#turned off because they may take substantial computation time
 		Tests.test_classification()
-		#Tests.test_classification_evolution()
+		Tests.test_classification_evolution()
+		Tests.test_classification_per_member()
 
 
 		pass
 
 	def test_classification():
 
+		#load test data
 		X,T = Tests.Utils.import_classification_data('iris')
 
+		#create simple classifier
 		patternnet = Pynet.Models.PatternnetGroup(8,True)
-		#patternnet = Pynet.Models.FitnetGroup(8,True)
-
 		patternnet.ConfigureGraph(showSteps=True)
 
-		#patternnet.trainer.epochs = 50
-		#patternnet.layers[0].transferFcn = 'leakyrelu'
-		#patternnet.preProcessor.processFcn = 'pca'
-		
+		#train the pynet
 		training_res = patternnet.Train(X,T)
 
+		#see the training loss
 		err = patternnet.Loss(X,T)
 
+		#simulate the output
 		Y = patternnet.Sim(X,recordGraph=True)
 
 		pass
 
 	def test_classification_evolution():
 
+		#import test data
 		X,T = Tests.Utils.import_classification_data('iris')
 
-		#patternnet = Pynet.Models.PatternnetGroup(8,True)
-		#patternnet.ConfigureGraph(True)
-		#training_res = patternnet.Train(X,T,False)
-
+		#evolve a pynet to the test data
 		evolved_pynet = Pynet.Evolve(X,T,True,10,'brier')
+
+		pass
+
+	def test_classification_per_member():
+
+		import random
+
+		tp = 0.6
+		vp = 0.25
+		sp = 0.15
+
+		n_members = 4
+
+		x_shape  = [n_members,100,3]
+		t_shape = [n_members,100,1]
+		X = np.zeros(x_shape,dtype=np.float64)
+		T = np.zeros(t_shape,dtype=np.float64)
+
+
+		for i in range(x_shape[0]):
+			for j in range(x_shape[1]):
+				for k in range(x_shape[2]):
+					X[i,j,k] = random.random()
+					#X[i,j,k] = i + j * k
+
+		for i in range(t_shape[0]):
+			for j in range(t_shape[1]):
+				for k in range(t_shape[2]):
+					T[i,j,k] = random.random()
+					#T[i,j,k] = i + j + k
+
+		net = Pynet.Models.FitnetGroup(n_members,False)
+		t_res = net.Train(X[0],T[0])
+
+		t_res2 = net.Train(X,T)
+		
+		pass
+	
+	def test_memberships():
+
+		#load test data
+		X,T = Tests.Utils.import_classification_data('iris')
+
+		#create simple classifier
+		net = Pynet.Models.PatternnetGroup(8,True)
+		net.ConfigureGraph(showSteps=True)
+
+		#train the pynet
+		training_res = net.Train(X,T)
+
+		net.ConfigureGraph()
+		nnet = net.MemberOut(2)
+		nnet2 = net.MemberOut(4)
+
+		nnet2.AppendMember(nnet)
+
+		res = net.Sim(X)
+		nres = nnet.Sim(X)
+		nres2 = nnet2.Sim(X)
+
+		if not all(res[2,:,:].flatten() == nres.flatten()):
+			raise ValueError('member out failed')
+
+		if not all(res[4,:,:].flatten() == nres2[0,:,:].flatten()):
+			raise ValueError('member out failed')
+
+		if not all(res[2,:,:].flatten() == nres2[1,:,:].flatten()):
+			raise ValueError('member out failed')
 
 		pass
 
@@ -3451,7 +3681,33 @@ class Tests:
 
 		pass
 
-	def test_performance():
+	def test_datasetdivider_dna_loop():
+
+		for i in range(100):
+			genes = DatasetDivider.DNA.Rand()
+
+			df,dp,_ = DatasetDivider.DNA.Read_Gene(genes,0)
+
+			genes2 = DatasetDivider.DNA.Write_Gene(df,dp)
+
+			if genes != genes2:
+				raise ValueError('genes dont match')
+
+		pass
+
+	def test_training_dna_loop():
+
+
+		for k in range(100):
+			genes = Training.DNA.Rand()
+
+			pf,tf,go,mf,ep,lr,mg,_ = Training.DNA.Read_Gene(genes,0)
+
+			genes2 = Training.DNA.Write_Gene(pf,tf,go,mf,ep,lr,mg)
+
+			if genes != genes2:
+				raise ValueError('training writing/reading genes incorrect')
+
 
 		pass
 
@@ -3468,6 +3724,9 @@ class Tests:
 		net2 = Pynet.DNA.Form(dna2,8,False,3)
 		dna2_2 = Pynet.DNA.Extract(net2)
 		if (dna2_2 != dna2): raise ValueError('dna cycle broken')
+
+		
+		if net1 != net2: raise ValueError('pynets not found to be equal')
 
 		pass
 
@@ -3501,6 +3760,7 @@ class Tests:
 		pass
 
 	class Utils:
+
 		def import_classification_data(dataset: str):
 			"""Import datasets specifically for testing classifications.
 			Args:
